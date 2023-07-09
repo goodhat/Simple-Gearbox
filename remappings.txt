@@ -1,0 +1,12 @@
+@chainlink/=lib/core-v2/node_modules/@chainlink/
+@eth-optimism/=lib/core-v2/node_modules/@eth-optimism/contracts/
+@gearbox-protocol/=lib/core-v2/node_modules/@gearbox-protocol/
+@openzeppelin/=lib/core-v2/node_modules/@openzeppelin/
+core-v2/=lib/core-v2/contracts/
+ds-test/=lib/forge-std/lib/ds-test/src/
+erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/
+forge-std/=lib/forge-std/src/
+openzeppelin-contracts/=lib/openzeppelin-contracts/
+openzeppelin/=lib/openzeppelin-contracts/contracts/
+v2-core/=lib/v2-core/contracts/
+v2-periphery/=lib/v2-periphery/contracts/
