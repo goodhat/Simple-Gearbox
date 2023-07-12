@@ -192,10 +192,7 @@ contract CreditFacade is ICreditFacadeExceptions, ICreditFacadeEvents, Reentranc
         // Simplified: only CreditAccount owner can add collateral
         if (msg.sender != onBehalfOf) revert AccountTransferNotAllowedException();
 
-        // Requests Credit Manager to transfer collateral to the Credit Account
         creditManager.addCollateral(msg.sender, creditAccount, token, amount);
-
-        // Emits event
         emit AddCollateral(onBehalfOf, token, amount);
     }
 
@@ -263,7 +260,7 @@ contract CreditFacade is ICreditFacadeExceptions, ICreditFacadeEvents, Reentranc
         // Computes total value in underlying
         totalValue = priceOracle.convertFromUSD(totalUSD, underlying);
 
-        (, uint256 borrowAmountWithInterest) = creditManager.calcCreditAccountAccruedInterest(creditAccount); // F:[FA-14]
+        (, uint256 borrowAmountWithInterest) = creditManager.calcCreditAccountAccruedInterest(creditAccount);
 
         // borrowAmountPlusInterestRateUSD x 10000 to be compared with USD values multiplied by LTs
         uint256 borrowAmountPlusInterestRateUSD =
