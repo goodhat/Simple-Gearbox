@@ -11,9 +11,7 @@ import "../src/PoolService.sol";
 import "../src/LinearInterestRateModel.sol";
 import "../src/PriceOracle.sol";
 import "../src/adapters/UniswapV2Adapter.sol";
-
 import "../src/libraries/Constants.sol";
-
 import {MultiCall} from "../src/libraries/MultiCall.sol";
 
 import "./helpers/UsefulAddresses.sol";
@@ -39,30 +37,35 @@ contract SimpleGearboxTest is Test, UsefulAddresses {
         vm.rollFork(17600000);
         vm.startPrank(admin);
 
-        // Create pool
+        // Create USDC pool, interest rate model, oracle
         interestRateModel = new LinearInterestRateModel(0, 0, 0, 0); // Simplified: neglect interest
         poolService = new PoolService(address(USDC), address(interestRateModel), type(uint256).max);
+        priceOracle = new SimplePriceOracle();
 
+        // Create CreditManager
         creditManager = new CreditManager(address(poolService), address(USDC));
+        creditManager.setPriceOracle(address(priceOracle));
         poolService.connectCreditManager(address(creditManager));
-        creditManager.setLiquidationThreshold(address(USDC), 1e4); // 100%
 
+        // Create CreditFacade
         creditFacade = new CreditFacade(address(creditManager));
         creditManager.upgradeCreditFacade(address(creditFacade));
 
-        priceOracle = new SimplePriceOracle();
-        creditManager.setPriceOracle(address(priceOracle));
-
+        // Create adapter and set allowance
         uniswapV2Adapter = new UniswapV2Adapter(address(creditManager), address(UNISWAP_V2_ROUTER));
         creditManager.changeContractAllowance(address(uniswapV2Adapter), address(UNISWAP_V2_ROUTER));
 
+        // Set token lt and ld
+        creditManager.setLiquidationThreshold(address(USDC), 1e4); // 100%
         creditManager.addToken(address(WETH));
         creditManager.setLiquidationThreshold(address(WETH), 9e3); // 90%
         creditManager.setLiquidationDiscount(8e3); // 20% off discount
 
-        priceOracle.setToUSD(address(USDC), 1e8);
+        // Set initial price
+        priceOracle.setToUSD(address(USDC), 1e8); // price decimal = 8
         priceOracle.setToUSD(address(WETH), 1800e8);
 
+        // Add liquidity to pool
         changePrank(lpProvider);
         deal(address(USDC), lpProvider, POOL_INITAIL_LIQUIDITY, true);
         USDC.approve(address(poolService), POOL_INITAIL_LIQUIDITY);
@@ -86,17 +89,17 @@ contract SimpleGearboxTest is Test, UsefulAddresses {
         uint256 AMOUNT_OPEN_WITH = 1000e6; // 1000 USDC
         uint16 LEVERAGE_RATIO = 500; // 6x leverage
 
+        // Open credit account
         vm.startPrank(user1);
         deal(address(USDC), user1, AMOUNT_OPEN_WITH, true);
         USDC.approve(address(creditManager), AMOUNT_OPEN_WITH);
         creditFacade.openCreditAccount(AMOUNT_OPEN_WITH, user1, LEVERAGE_RATIO);
-        vm.stopPrank();
 
+        // Check borrowed amount
         address creditAccount = creditManager.getCreditAccountOrRevert(user1);
-
         assertEq(USDC.balanceOf(creditAccount), AMOUNT_OPEN_WITH * (1 + LEVERAGE_RATIO / LEVERAGE_DECIMALS));
 
-        vm.startPrank(user1);
+        // Swap 5000 USDC for WETH via UniswapV2Router
         MultiCall[] memory mcalls = new MultiCall[](1);
         mcalls[0].target = address(uniswapV2Adapter);
         address[] memory path = new address[](2);
@@ -107,8 +110,10 @@ contract SimpleGearboxTest is Test, UsefulAddresses {
         );
         creditFacade.multicall(mcalls);
 
-        // Assume user1 earn lots of usdc and decide to close the account
-        deal(address(USDC), creditAccount, 5100000000);
+        // Assume user1 earn the exact usdc as debt and decide to close the account
+        // When closing the account, all USDC will be repayed to pool, and WETH will
+        // be transfered to user1.
+        deal(address(USDC), creditAccount, 5000000001);
         MultiCall[] memory closeMcalls;
         creditFacade.closeCreditAccount(user1, closeMcalls);
     }
@@ -121,13 +126,10 @@ contract SimpleGearboxTest is Test, UsefulAddresses {
         deal(address(USDC), user1, AMOUNT_OPEN_WITH, true);
         USDC.approve(address(creditManager), AMOUNT_OPEN_WITH);
         creditFacade.openCreditAccount(AMOUNT_OPEN_WITH, user1, LEVERAGE_RATIO);
-        vm.stopPrank();
 
         address creditAccount = creditManager.getCreditAccountOrRevert(user1);
-
         assertEq(USDC.balanceOf(creditAccount), AMOUNT_OPEN_WITH * (1 + LEVERAGE_RATIO / LEVERAGE_DECIMALS));
 
-        vm.startPrank(user1);
         MultiCall[] memory mcalls = new MultiCall[](1);
         mcalls[0].target = address(uniswapV2Adapter);
         address[] memory path = new address[](2);
@@ -138,28 +140,37 @@ contract SimpleGearboxTest is Test, UsefulAddresses {
         );
         creditFacade.multicall(mcalls);
 
-        // Lower eth price to test liquidate
+        // Lower WETH price. This will turn the credit account into unhealthy,
+        // so we can test liquidation.
         assert(creditFacade.calcCreditAccountHealthFactor(creditAccount) > 1e4);
         changePrank(admin);
         priceOracle.setToUSD(address(WETH), 1600 * 1e8);
         assert(creditFacade.calcCreditAccountHealthFactor(creditAccount) < 1e4);
 
+        // User2 liquidate user1's credit account
         changePrank(user2);
-        deal(address(USDC), user2, 100000e6);
-        USDC.approve(address(creditManager), type(uint256).max); //
-        _logBalance(user2);
 
+        // // Liquidation method 1:
+        // //   Pay debt and remaining fund by user2 itself.
+        // //   Get remaining USDC and WETH.
+        // deal(address(USDC), user2, 100000e6);
+        // USDC.approve(address(creditManager), type(uint256).max);
+        // mcalls = new MultiCall[](0);
+        // creditFacade.liquidateCreditAccount(user1, user2, mcalls);
+
+        // Liquidation method 2:
+        //  Swap all WETH back to underlying (USDC), and pay the debt.
+        //  Get remaining USDC.
         mcalls = new MultiCall[](1);
         mcalls[0].target = address(uniswapV2Adapter);
         path = new address[](2);
         path[0] = address(WETH);
         path[1] = address(USDC);
         mcalls[0].callData = abi.encodeCall(
-            UniswapV2Adapter.swapTokensForExactTokens,
-            (AMOUNT_OPEN_WITH * 4, type(uint256).max, path, address(0), block.timestamp)
+            UniswapV2Adapter.swapExactTokensForTokens,
+            (WETH.balanceOf(creditAccount), 0, path, address(0), block.timestamp)
         );
         creditFacade.liquidateCreditAccount(user1, user2, mcalls);
-        _logBalance(user2);
     }
 
     function _logBalance(address addr) internal {
