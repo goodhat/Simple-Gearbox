@@ -37,6 +37,19 @@ Among these components, I rewrote `CreditManager` and `CreditFacade`, and left o
 - Close credit accounts
 - Liquidate credit accounts
 
+Here are the sequence graphs of opening a credit account, multicall, and liquidate an unhealthy credit account.
+
+- Open a credite account
+  ![OpenAccount](./img/OpenAccount.svg "OpenAccount")
+
+- Multicall
+  ![MultiCall](./img/Multicall.svg "MultiCall")
+
+- Liquidate a credit account
+  ![Liquidate](./img/Liquidate.svg "Liquidate")
+
+### Test cases
+
 There are two tests cases in `test/SimpleGearbox.t.sol`:
 
 - `testOpenCreditAccountAndLiquidate`
